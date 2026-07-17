@@ -7,6 +7,23 @@ VLSI Copilot is an AI-assisted RTL analysis platform built using Python and Fast
 The goal of this project is to help RTL engineers analyze Verilog modules, detect structural issues, generate reports, and automate common digital design tasks.
 
 ---
+## Project Screenshots
+
+### Swagger API
+
+![Swagger](images/swagger-home.png)
+
+---
+
+### Upload Response
+
+![Upload](images/upload-response.png)
+
+---
+
+### Project Structure
+
+![Structure](images/project-structure.png)
 
 ## Features
 
