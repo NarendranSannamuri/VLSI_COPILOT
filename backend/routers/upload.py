@@ -4,6 +4,7 @@ from backend.analyzers.rtl_analyzer import analyze_rtl
 from backend.analyzers.design_checker import check_design
 from backend.analyzers.metrics import calculate_metrics
 from backend.services.report_generator import generate_report
+from backend.services.testbench_generator import generate_testbench
 
 router = APIRouter()
 
@@ -27,10 +28,16 @@ async def upload_verilog(file: UploadFile = File(...)):
         warnings,
         metrics
     )
+    testbench = generate_testbench(parsed)
 
     return {
+
         "filename": file.filename,
-        "report": report
+
+        "report": report,
+
+        "testbench": testbench
+
     }
 
 

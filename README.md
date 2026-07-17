@@ -1,42 +1,59 @@
 # VLSI Copilot
 
-## 🚀 Overview
+![Banner](images/banner.png)
 
-VLSI Copilot is an AI-assisted RTL analysis platform built using Python and FastAPI.
+## Overview
 
-The goal of this project is to help RTL engineers analyze Verilog modules, detect structural issues, generate reports, and automate common digital design tasks.
+VLSI Copilot is an AI-assisted RTL analysis platform for Verilog designs.
+
+It helps engineers and students analyze Verilog modules, detect structural issues, calculate design metrics, and generate engineering reports.
 
 ---
-## Project Screenshots
+
+## Features
+
+- Upload Verilog RTL
+- Parse Verilog modules
+- RTL structural analysis
+- Design metrics
+- Design warnings
+- Engineering report generation
+
+---
+
+## Tech Stack
+
+- Python
+- FastAPI
+- Git
+- Verilog
+- Regex Parsing
+
+---
+
+## Project Architecture
+
+![Architecture](images/architecture.png)
+
+---
+
+## Screenshots
 
 ### Swagger API
 
 ![Swagger](images/swagger-home.png)
 
----
-
 ### Upload Response
 
 ![Upload](images/upload-response.png)
 
----
-
 ### Project Structure
 
-![Structure](images/project-structure.png)
-
-## Features
-
-- Upload Verilog (.v) files
-- Parse Verilog modules
-- RTL structural analysis
-- Design rule checking
-- RTL metrics generation
-- Engineering report generation
+![Project](images/project-structure.png)
 
 ---
 
-## Project Structure
+## Folder Structure
 
 ```text
 backend/
@@ -45,56 +62,26 @@ backend/
     routers/
     services/
 
-frontend/
+images/
 
-examples/
-
-tests/
+docs/
 ```
 
 ---
 
-## Technologies Used
+## Future Roadmap
 
-- Python
-- FastAPI
-- Git
-- GitHub
-
----
-
-## Current Status
-
-✅ Backend Setup
-
-✅ Verilog Parser
-
-✅ RTL Analyzer
-
-✅ Design Checker
-
-✅ Metrics Engine
-
-✅ Report Generator
-
-⬜ Testbench Generator
-
-⬜ AI RTL Reviewer
-
-⬜ Timing Report Analyzer
-
----
-
-## Future Improvements
-
+- Verilog Testbench Generator
 - FSM Detection
-- Timing Analysis
-- Testbench Generator
-- AI Review Assistant
-- Frontend Dashboard
+- Timing Report Analysis
+- AI RTL Reviewer
+- Syntax Error Detection
+- Web Dashboard
 
 ---
 
 ## Author
 
-Naren
+Narendran Sannamuri
+ECE Student
+Aspiring VLSI Physical Design Engineer
