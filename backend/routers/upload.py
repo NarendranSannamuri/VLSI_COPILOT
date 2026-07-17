@@ -5,6 +5,7 @@ from backend.analyzers.design_checker import check_design
 from backend.analyzers.metrics import calculate_metrics
 from backend.services.report_generator import generate_report
 from backend.services.testbench_generator import generate_testbench
+from backend.analyzers.syntax_checker import check_syntax
 
 router = APIRouter()
 
@@ -15,6 +16,7 @@ async def upload_verilog(file: UploadFile = File(...)):
     content = await file.read()
 
     verilog_text = content.decode("utf-8")
+    syntax_errors = check_syntax(verilog_text)
 
     parsed = parse_verilog(verilog_text)
 
@@ -36,7 +38,9 @@ async def upload_verilog(file: UploadFile = File(...)):
 
         "report": report,
 
-        "testbench": testbench
+        "testbench": testbench,
+
+        "syntax_errors": syntax_errors
 
     }
 
