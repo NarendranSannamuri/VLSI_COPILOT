@@ -1,3 +1,4 @@
+from backend.ai.reviewer import review_verilog
 from fastapi import APIRouter, UploadFile, File
 from backend.parsers.verilog_parser import parse_verilog
 from backend.analyzers.rtl_analyzer import analyze_rtl
@@ -30,17 +31,17 @@ async def upload_verilog(file: UploadFile = File(...)):
         warnings,
         metrics
     )
+    ai_review = review_verilog(verilog_text)
     testbench = generate_testbench(parsed)
 
     return {
-
         "filename": file.filename,
-
-        "report": report,
-
-        "testbench": testbench,
-
-        "syntax_errors": syntax_errors
+        "parsed_data": parsed,
+        "analysis": analysis,
+        "warnings": warnings,
+        "metrics": metrics,
+        "ai_review": ai_review,
+        "report": report
 
     }
 
