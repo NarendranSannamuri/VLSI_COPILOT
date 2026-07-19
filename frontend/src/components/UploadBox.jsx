@@ -1,44 +1,105 @@
-import { UploadCloud } from "lucide-react";
+import { useState } from "react";
+import api from "../services/api";
 
-function UploadCard() {
-  return (
-    <section className="flex justify-center mt-10">
+function UploadBox() {
 
-      <div className="w-[750px] bg-slate-900 border border-slate-800 rounded-3xl p-10 shadow-2xl">
+    const [result, setResult] = useState(null);
+    const [file, setFile] = useState(null);
+    const [loading, setLoading] = useState(false);
 
-        <h2 className="text-3xl font-semibold text-center">
-          Upload RTL Design
-        </h2>
+    const uploadRTL = async () => {
 
-        <p className="text-slate-400 text-center mt-3">
-          Analyze Verilog (.v / .sv) files using AI
-        </p>
+        if (!file) {
+            alert("Please choose a Verilog file.");
+            return;
+        }
 
-        <div className="mt-10 border-2 border-dashed border-slate-700 rounded-2xl p-16 flex flex-col items-center">
+        const formData = new FormData();
+        formData.append("file", file);
 
-          <UploadCloud
-            size={70}
-            className="text-blue-500"
-          />
+        try {
 
-          <h3 className="mt-6 text-xl font-semibold">
-            Drag & Drop RTL File
-          </h3>
+            setLoading(true);
 
-          <p className="text-slate-400 mt-3">
-            or
-          </p>
+            const response = await api.post(
+                "/upload",
+                formData
+            );
 
-          <button className="mt-6 bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl transition">
-            Browse Files
-          </button>
+            // Save backend response
+            setResult(response.data);
 
-        </div>
+            console.log(response.data);
 
-      </div>
+            alert("RTL Analysis Complete!");
 
-    </section>
-  );
+        } catch (error) {
+
+            console.log(error);
+
+            alert("Upload Failed");
+
+        } finally {
+
+            setLoading(false);
+
+        }
+
+    };
+
+    return (
+
+        <section className="flex justify-center mt-12">
+
+            <div className="w-[760px] bg-slate-900 border border-slate-800 rounded-3xl p-10 shadow-xl">
+
+                <h2 className="text-3xl font-semibold text-center">
+                    Upload RTL Design
+                </h2>
+
+                <p className="text-slate-400 text-center mt-3">
+                    Upload your Verilog (.v / .sv) design for AI analysis
+                </p>
+
+                <div className="mt-10 border-2 border-dashed border-slate-700 rounded-2xl p-14 text-center">
+
+                    <input
+                        type="file"
+                        onChange={(e) => setFile(e.target.files[0])}
+                    />
+
+                    {file && (
+                        <p className="mt-5 text-green-400">
+                            Selected:
+                            <br />
+                            {file.name}
+                        </p>
+                    )}
+
+                    <button
+                        onClick={uploadRTL}
+                        disabled={loading}
+                        className="mt-8 bg-blue-600 hover:bg-blue-700 transition px-8 py-3 rounded-xl"
+                    >
+                        {loading ? "Analyzing RTL..." : "Analyze RTL"}
+                    </button>
+
+                </div>
+
+                {/* Show Backend JSON */}
+
+                {result && (
+                    <pre className="mt-10 bg-slate-950 p-6 rounded-xl overflow-auto text-sm text-left">
+                        {JSON.stringify(result, null, 2)}
+                    </pre>
+                )}
+
+            </div>
+
+        </section>
+
+    );
+
 }
 
-export default UploadCard;
+export default UploadBox;
