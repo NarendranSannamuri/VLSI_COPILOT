@@ -1,22 +1,23 @@
 # Python
-__pycache__/
-*.py[cod]
-*.pyo
-
-# Virtual Environment
 venv/
+__pycache__/
+*.pyc
 
-# VS Code
-.vscode/
-
-# Environment Variables
+# Environment variables
 .env
 
-# Pytest
-.pytest_cache/
+# Generated reports
+RTL_Report.pdf
 
-# macOS
+# IDE
+.vscode/
+
+# OS
 .DS_Store
-
-# Windows
 Thumbs.db
+
+# Node
+frontend/node_modules/
+
+# Logs
+*.log
