@@ -1,14 +1,13 @@
 import { useState } from "react";
 import api from "../services/api";
+import Dashboard from "./Dashboard";
 
 function UploadBox() {
-
     const [result, setResult] = useState(null);
     const [file, setFile] = useState(null);
     const [loading, setLoading] = useState(false);
 
     const uploadRTL = async () => {
-
         if (!file) {
             alert("Please choose a Verilog file.");
             return;
@@ -18,41 +17,27 @@ function UploadBox() {
         formData.append("file", file);
 
         try {
-
             setLoading(true);
 
-            const response = await api.post(
-                "/upload",
-                formData
-            );
+            const response = await api.post("/upload", formData);
 
-            // Save backend response
             setResult(response.data);
 
             console.log(response.data);
 
             alert("RTL Analysis Complete!");
-
         } catch (error) {
-
             console.log(error);
 
             alert("Upload Failed");
-
         } finally {
-
             setLoading(false);
-
         }
-
     };
 
     return (
-
         <section className="flex justify-center mt-12">
-
             <div className="w-[760px] bg-slate-900 border border-slate-800 rounded-3xl p-10 shadow-xl">
-
                 <h2 className="text-3xl font-semibold text-center">
                     Upload RTL Design
                 </h2>
@@ -62,7 +47,6 @@ function UploadBox() {
                 </p>
 
                 <div className="mt-10 border-2 border-dashed border-slate-700 rounded-2xl p-14 text-center">
-
                     <input
                         type="file"
                         onChange={(e) => setFile(e.target.files[0])}
@@ -83,23 +67,12 @@ function UploadBox() {
                     >
                         {loading ? "Analyzing RTL..." : "Analyze RTL"}
                     </button>
-
                 </div>
 
-                {/* Show Backend JSON */}
-
-                {result && (
-                    <pre className="mt-10 bg-slate-950 p-6 rounded-xl overflow-auto text-sm text-left">
-                        {JSON.stringify(result, null, 2)}
-                    </pre>
-                )}
-
+                {result && <Dashboard result={result} />}
             </div>
-
         </section>
-
     );
-
 }
 
 export default UploadBox;
