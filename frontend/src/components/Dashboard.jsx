@@ -3,12 +3,15 @@ import MetricsCard from "./results/MetricsCard";
 import AIReviewCard from "./results/AIReviewCard";
 import BugCard from "./results/BugCard";
 import DownloadCard from "./results/DownloadCard";
+import TestbenchCard from "./results/TestbenchCard";
 
 function Dashboard({ result }) {
 
     return (
 
-        <section className="mt-16">
+        <section className="mt-16 space-y-8">
+
+            {/* Score + Metrics */}
 
             <div className="grid lg:grid-cols-2 gap-8">
 
@@ -22,27 +25,27 @@ function Dashboard({ result }) {
 
             </div>
 
-            <div className="mt-8">
+            {/* AI Review */}
 
-                <AIReviewCard
-                    review={result.ai_review}
-                />
+            <AIReviewCard
+                review={result.ai_review}
+            />
 
-            </div>
+            {/* Bug Detection */}
 
-            <div className="mt-8">
+            <BugCard
+                bugs={result.bugs}
+            />
 
-                <BugCard
-                    bugs={result.bugs}
-                />
+            {/* Generated Testbench */}
 
-            </div>
+            <TestbenchCard
+                testbench={result.testbench}
+            />
 
-            <div className="grid lg:grid-cols-2 gap-8 mt-8">
+            {/* Download Report */}
 
-                <DownloadCard/>
-
-            </div>
+            <DownloadCard />
 
         </section>
 
