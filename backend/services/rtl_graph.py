@@ -222,6 +222,8 @@ class RTLGraph:
         # Build the graph representation
         self.nodes = {}
         self._build_graph()
+        self.rank = {}
+        self._compute_layout()
 
     def _build_graph(self):
         # 1. Add input ports
@@ -398,6 +400,8 @@ class RTLGraph:
         for oid in output_ids:
             rank[oid] = max_gate_rank + 1
 
+        self.rank = rank
+
         # 4. Group by rank
         columns = {}
         for nid, r in rank.items():
@@ -483,11 +487,11 @@ class RTLGraph:
         canvas_width, canvas_height = self._compute_layout()
         canvas = MiniCanvas(canvas_width, canvas_height, theme=theme)
 
-        # 1. Draw solid wires (lines) with nice layout and actual RTL signal names
+        # Gather all wires in the schematic
+        wires = []
         for nid, node in self.nodes.items():
             if node["type"] == "input":
                 continue
-
             for idx, inp_id in enumerate(node["inputs"]):
                 if inp_id not in self.nodes:
                     continue
@@ -498,7 +502,6 @@ class RTLGraph:
                     xs = src_node["x"] + 10
                     ys = src_node["y"]
                 else:  # Gate node
-                    # Adjust for bubble if gate has a bubble
                     gt = src_node.get("gate_type", "")
                     bubble_offset = 24 if gt in ["NAND", "NOR", "XNOR", "NOT"] else 20
                     xs = src_node["x"] + bubble_offset
@@ -516,23 +519,55 @@ class RTLGraph:
                     else:
                         yd = node["y"]
 
-                # Cubic Bezier wire path
+                r_src = self.rank.get(src_node["id"], 0)
+                wires.append({
+                    "src_id": src_node["id"],
+                    "dst_id": node["id"],
+                    "idx": idx,
+                    "xs": xs,
+                    "ys": ys,
+                    "xd": xd,
+                    "yd": yd,
+                    "r_src": r_src,
+                    "src_node": src_node
+                })
+
+        # Group wires by transition band r_src and sort to assign non-overlapping lanes
+        transition_groups = {}
+        for w in wires:
+            transition_groups.setdefault(w["r_src"], []).append(w)
+
+        # Draw wires using Manhattan orthogonal routing
+        for r_src, group in transition_groups.items():
+            sorted_group = sorted(group, key=lambda item: (item["ys"], item["yd"]))
+            for lane_idx, w in enumerate(sorted_group):
+                xs, ys = w["xs"], w["ys"]
+                xd, yd = w["xd"], w["yd"]
+                src_node = w["src_node"]
+
+                # Assign dynamic lane offset
+                lane_x = xs + 30 + lane_idx * 8
+                if lane_x >= xd - 15:
+                    lane_x = xd - 15
+
+                # Manhattan Orthogonal Routing Path
                 wire_commands = [
                     ('M', xs, ys),
-                    ('C', xs + 35, ys, xd - 35, yd, xd, yd)
+                    ('L', lane_x, ys),
+                    ('L', lane_x, yd),
+                    ('L', xd, yd)
                 ]
                 canvas.draw_path(wire_commands, stroke_width=1.5)
 
                 # Draw actual RTL signal name label
-                # If the wire originates from a gate, label it with the assignment target
                 if src_node["type"] == "gate":
-                    sig_label = src_node["outputs"][0]
-                    # Draw signal name label just above the source wire pin
-                    canvas.draw_text(
-                        xs + 8, ys - 5, sig_label,
-                        font_size=8, text_anchor="left",
-                        color=canvas.colors["wire_label"]
-                    )
+                    if src_node.get("gate_type") != "CORE":
+                        sig_label = src_node["outputs"][0]
+                        canvas.draw_text(
+                            xs + 8, ys - 5, sig_label,
+                            font_size=8, text_anchor="left",
+                            color=canvas.colors["wire_label"]
+                        )
 
         # 2. Draw actual components/nodes
         for nid, node in self.nodes.items():

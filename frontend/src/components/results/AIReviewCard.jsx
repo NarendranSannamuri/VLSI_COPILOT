@@ -1,5 +1,13 @@
+import React from "react";
+
 function AIReviewCard({ review }) {
-    if (!review) return null;
+    if (!review) {
+        return (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg flex items-center justify-center text-slate-400 text-sm italic min-h-[200px]">
+                Generating AI engineering review...
+            </div>
+        );
+    }
 
     // Gracefully handle string-based reviews or errors to prevent page crashes
     if (typeof review === "string" || !review.strengths) {
