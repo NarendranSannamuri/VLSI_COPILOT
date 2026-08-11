@@ -13,6 +13,7 @@ from backend.analyzers.metrics import calculate_metrics
 from backend.services.report_generator import generate_report
 from backend.services.testbench_generator import generate_testbench
 from backend.analyzers.syntax_checker import check_syntax
+from backend.services.rtl_graph import RTLGraph
 
 router = APIRouter()
 
@@ -41,6 +42,15 @@ async def upload_verilog(file: UploadFile = File(...)):
     rtl_score = score_verilog(verilog_text)
     testbench = generate_testbench(parsed)
     bugs = detect_bugs(verilog_text)
+
+    # Instantiate RTL graph and generate diagrams
+    rtl_graph = RTLGraph(parsed)
+    block_diagram_svg = rtl_graph.generate_block_diagram(theme="dark").to_svg()
+    schematic_diagram_svg = rtl_graph.generate_schematic_diagram(theme="dark").to_svg()
+
+    block_diagram_rl = rtl_graph.generate_block_diagram(theme="light").to_reportlab()
+    schematic_diagram_rl = rtl_graph.generate_schematic_diagram(theme="light").to_reportlab()
+
     pdf_report = generate_pdf(
         file.filename,
         parsed,
@@ -48,7 +58,9 @@ async def upload_verilog(file: UploadFile = File(...)):
         metrics,
         ai_review,
         rtl_score,
-        bugs
+        bugs,
+        block_diagram_rl,
+        schematic_diagram_rl
     )
 
     return {
@@ -63,8 +75,9 @@ async def upload_verilog(file: UploadFile = File(...)):
     "bugs": bugs,
     "testbench": testbench,
     "pdf_report": pdf_report,
-    "report": report
-
+    "report": report,
+    "block_diagram_svg": block_diagram_svg,
+    "schematic_diagram_svg": schematic_diagram_svg
     }
 
 
