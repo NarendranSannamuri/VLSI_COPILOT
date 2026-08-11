@@ -25,6 +25,39 @@ function Dashboard({ result }) {
 
             </div>
 
+            {/* Design Visualizations */}
+            <div className="space-y-8">
+                {result.block_diagram_svg && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg">
+                        <h2 className="text-2xl font-semibold mb-2 text-blue-400">
+                            Top-Level Architecture Block Diagram
+                        </h2>
+                        <p className="text-slate-400 mb-6 text-sm">
+                            Derived architectural interface block showing input ports, core module boundaries, and output ports.
+                        </p>
+                        <div
+                            className="bg-slate-950 rounded-xl p-6 border border-slate-800 overflow-x-auto flex justify-center items-center"
+                            dangerouslySetInnerHTML={{ __html: result.block_diagram_svg }}
+                        />
+                    </div>
+                )}
+
+                {result.schematic_diagram_svg && (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg">
+                        <h2 className="text-2xl font-semibold mb-2 text-emerald-400">
+                            Gate-Level Logic Schematic Diagram
+                        </h2>
+                        <p className="text-slate-400 mb-6 text-sm">
+                            Reconstructed combinational gate network mapped topologically from left to right using actual RTL signal names.
+                        </p>
+                        <div
+                            className="bg-slate-950 rounded-xl p-6 border border-slate-800 overflow-x-auto flex justify-center items-center"
+                            dangerouslySetInnerHTML={{ __html: result.schematic_diagram_svg }}
+                        />
+                    </div>
+                )}
+            </div>
+
             {/* AI Review */}
 
             <AIReviewCard
