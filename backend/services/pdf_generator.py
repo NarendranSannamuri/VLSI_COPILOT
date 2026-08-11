@@ -1,8 +1,30 @@
 import os
 import re
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer, KeepTogether
+from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame, Paragraph, Table, TableStyle, Spacer, PageBreak, NextPageTemplate
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, landscape
+from reportlab.graphics.shapes import Drawing, Group
+
+def scale_drawing(d, max_w, max_h):
+    """Uniformly scales a ReportLab Drawing object to fit max_w and max_h, preserving aspect ratio."""
+    orig_w, orig_h = d.width, d.height
+    if orig_w <= 0 or orig_h <= 0:
+        return d
+
+    scale = min(max_w / orig_w, max_h / orig_h)
+
+    g = Group()
+    for child in list(d.contents):
+        g.add(child)
+    d.contents.clear()
+
+    g.scale(scale, scale)
+    d.add(g)
+
+    d.width = orig_w * scale
+    d.height = orig_h * scale
+    return d
 
 def make_table(data, col_widths=None):
     """Creates a beautifully styled, professional-looking table for the report."""
@@ -67,9 +89,19 @@ def generate_pdf(
     schematic_diagram_rl=None
 ):
     pdf_name = "RTL_Report.pdf"
-    doc = SimpleDocTemplate(
+
+    # Establish base document template with dynamic portrait/landscape page layout switching
+    # Portrait frame printable width: 612 - 80 = 532, printable height: 792 - 80 = 712
+    # Landscape frame printable width: 792 - 80 = 712, printable height: 612 - 80 = 532
+    frame_portrait = Frame(40, 40, 532, 712, id='F_portrait')
+    template_portrait = PageTemplate(id='T_portrait', frames=frame_portrait, pagesize=letter)
+
+    frame_landscape = Frame(40, 40, 712, 532, id='F_landscape')
+    template_landscape = PageTemplate(id='T_landscape', frames=frame_landscape, pagesize=landscape(letter))
+
+    doc = BaseDocTemplate(
         pdf_name,
-        rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40
+        pageTemplates=[template_portrait, template_landscape]
     )
 
     styles = getSampleStyleSheet()
@@ -127,16 +159,49 @@ def generate_pdf(
 
     if block_diagram_rl:
         story.append(Paragraph("<b>Figure 1: Module Architecture Block Diagram</b>", h3_style))
-        story.append(block_diagram_rl)
+        # Uniformly scale the block diagram to fit the standard portrait space
+        scaled_block = scale_drawing(block_diagram_rl, 532, 220)
+        story.append(scaled_block)
         story.append(Spacer(1, 15))
 
-    # 3. Section 2: Gate-Level Schematic Diagram
+    # 3. Section 2: Gate-Level Schematic Diagram (on dedicated landscape/portrait page)
     if schematic_diagram_rl:
+        # Convert to list if it is a single drawing
+        parts_list = schematic_diagram_rl if isinstance(schematic_diagram_rl, list) else [schematic_diagram_rl]
+
+        # Decide if any part is wide and needs landscape mode
+        any_wide = any(d.width > 500 for d in parts_list)
+
+        # Force a page break before the Schematic Diagram to keep it isolated and clean
+        story.append(PageBreak())
+
+        if any_wide:
+            story.append(NextPageTemplate('T_landscape'))
+            story.append(PageBreak())
+
         story.append(Paragraph("2. Gate-Level Logic Schematic Diagram", h2_style))
         story.append(Paragraph("The schematic below illustrates the derived logic gate network mapped topologically from left to right:", normal_style))
-        story.append(Spacer(1, 8))
-        story.append(schematic_diagram_rl)
-        story.append(Spacer(1, 15))
+        story.append(Spacer(1, 10))
+
+        for idx, part_rl in enumerate(parts_list):
+            if len(parts_list) > 1:
+                story.append(Paragraph(f"<b>Schematic Partition Part {idx + 1} of {len(parts_list)}</b>", h3_style))
+
+            # Scale uniformly to fit printable area (Landscape: 712 x 420, Portrait: 532 x 420)
+            max_w = 712 if any_wide else 532
+            max_h = 420
+            scaled_part = scale_drawing(part_rl, max_w, max_h)
+            story.append(scaled_part)
+
+            if idx < len(parts_list) - 1:
+                story.append(PageBreak())
+
+        if any_wide:
+            # Revert to Portrait template for the remaining content
+            story.append(NextPageTemplate('T_portrait'))
+            story.append(PageBreak())
+        else:
+            story.append(Spacer(1, 15))
 
     # 4. Section 3: Design Metrics & Structural Checks
     story.append(Paragraph("3. Design Metrics & Structural Checks", h2_style))
@@ -149,7 +214,7 @@ def generate_pdf(
     story.append(make_table(metrics_data, col_widths=[250, 250]))
     story.append(Spacer(1, 15))
 
-    # 5. Section 4: RTL Score & Optimization Suggestions
+    # 5. Section 4: RTL Quality & Synthesizability Score
     story.append(Paragraph("4. RTL Quality & Synthesizability Score", h2_style))
 
     score_val = rtl_score.get("rtl_score", 0) if isinstance(rtl_score, dict) else 0
@@ -178,19 +243,39 @@ def generate_pdf(
     # 6. Section 5: Bug Detection Analysis
     story.append(Paragraph("5. Bug Detection & Verification Analysis", h2_style))
 
-    severity = bugs.get("severity", "None") if isinstance(bugs, dict) else "None"
-    if severity == "None" or severity == "Unknown":
-        story.append(Paragraph("<b>No critical RTL bugs or synthesis issues were detected in this Verilog design.</b>", normal_style))
+    if isinstance(bugs, dict):
+        severity = bugs.get("severity", "None")
+        if severity == "None" or severity == "Unknown":
+            story.append(Paragraph("<b>No critical RTL bugs or synthesis issues were detected in this Verilog design.</b>", normal_style))
+        else:
+            bug_data = [
+                ["RTL Verification Field", "Diagnostic Details"],
+                ["Diagnostic Severity", str(bugs.get("severity", "N/A"))],
+                ["Identified Issue Type", str(bugs.get("bug_type", "N/A"))],
+                ["Approximate Line Number", str(bugs.get("line", "N/A"))],
+                ["Technical Reason", str(bugs.get("reason", "N/A"))],
+                ["Actionable Recommendation", str(bugs.get("recommendation", "N/A"))]
+            ]
+            story.append(make_table(bug_data, col_widths=[160, 340]))
+    elif isinstance(bugs, list):
+        if not bugs:
+            story.append(Paragraph("<b>No critical RTL bugs or synthesis issues were detected in this Verilog design.</b>", normal_style))
+        else:
+            for b_idx, bug in enumerate(bugs):
+                story.append(Paragraph(f"<b>Bug #{b_idx + 1} Diagnostic Details:</b>", h3_style))
+                bug_data = [
+                    ["RTL Verification Field", "Diagnostic Details"],
+                    ["Diagnostic Severity", str(bug.get("severity", "N/A")) if isinstance(bug, dict) else "N/A"],
+                    ["Identified Issue Type", str(bug.get("bug_type", "N/A")) if isinstance(bug, dict) else "N/A"],
+                    ["Approximate Line Number", str(bug.get("line", "N/A")) if isinstance(bug, dict) else "N/A"],
+                    ["Technical Reason", str(bug.get("reason", "N/A")) if isinstance(bug, dict) else "N/A"],
+                    ["Actionable Recommendation", str(bug.get("recommendation", "N/A")) if isinstance(bug, dict) else "N/A"]
+                ]
+                story.append(make_table(bug_data, col_widths=[160, 340]))
+                story.append(Spacer(1, 10))
     else:
-        bug_data = [
-            ["RTL Verification Field", "Diagnostic Details"],
-            ["Diagnostic Severity", str(bugs.get("severity", "N/A"))],
-            ["Identified Issue Type", str(bugs.get("bug_type", "N/A"))],
-            ["Approximate Line Number", str(bugs.get("line", "N/A"))],
-            ["Technical Reason", str(bugs.get("reason", "N/A"))],
-            ["Actionable Recommendation", str(bugs.get("recommendation", "N/A"))]
-        ]
-        story.append(make_table(bug_data, col_widths=[160, 340]))
+        # If string
+        story.append(Paragraph(str(bugs), normal_style))
     story.append(Spacer(1, 15))
 
     # 7. Section 6: AI-Assisted Expert Engineering Review

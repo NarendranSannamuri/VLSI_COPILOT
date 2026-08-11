@@ -1,4 +1,3 @@
-
 from fastapi.responses import FileResponse
 import os
 from pydantic import BaseModel
@@ -66,7 +65,7 @@ async def upload_verilog(file: UploadFile = File(...), authorization: str = Head
         schematic_diagram_svg = rtl_graph.generate_schematic_diagram(theme="dark").to_svg()
 
         block_diagram_rl = rtl_graph.generate_block_diagram(theme="light").to_reportlab()
-        schematic_diagram_rl = rtl_graph.generate_schematic_diagram(theme="light").to_reportlab()
+        schematic_diagram_rl = [part.to_reportlab() for part in rtl_graph.generate_schematic_diagram_parts(theme="light")]
 
         pdf_report = generate_pdf(
             file.filename,
@@ -196,7 +195,7 @@ def generate_premium_report(req: PremiumRequestSchema, email: str = Depends(get_
 
     rtl_graph = RTLGraph(parsed)
     block_diagram_rl = rtl_graph.generate_block_diagram(theme="light").to_reportlab()
-    schematic_diagram_rl = rtl_graph.generate_schematic_diagram(theme="light").to_reportlab()
+    schematic_diagram_rl = [part.to_reportlab() for part in rtl_graph.generate_schematic_diagram_parts(theme="light")]
 
     pdf_report = generate_pdf(
         req.filename,

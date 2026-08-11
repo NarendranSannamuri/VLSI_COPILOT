@@ -47,3 +47,38 @@ def test_sequential_fallback():
     assert "Sequential Core" in svg_schem
     assert "clk" in svg_schem
     assert "z" in svg_schem
+
+def test_partitioned_schematic_diagram():
+    # A design with deep rank logic to trigger partitioned drawing split
+    verilog = """
+    module deep_logic(
+        input in_a, in_b, in_c, in_d, in_e,
+        output out_f
+    );
+        wire w1 = in_a & in_b;
+        wire w2 = w1 | in_c;
+        wire w3 = w2 ^ in_d;
+        wire w4 = ~w3;
+        assign out_f = w4 & in_e;
+    endmodule
+    """
+    parsed = parse_verilog(verilog)
+    g = RTLGraph(parsed)
+
+    # Check that rank spacing exists
+    w, h = g._compute_layout()
+    assert len(g.rank) > 0
+
+    # Generate partitioned diagrams in both dark and light themes
+    parts_dark = g.generate_schematic_diagram_parts(theme="dark")
+    parts_light = g.generate_schematic_diagram_parts(theme="light")
+
+    assert len(parts_dark) > 0
+    assert len(parts_light) > 0
+    assert len(parts_dark) == len(parts_light)
+
+    # Verify reportlab serialization for each light part
+    for part in parts_light:
+        rl_drawing = part.to_reportlab()
+        assert rl_drawing.width > 0
+        assert rl_drawing.height > 0

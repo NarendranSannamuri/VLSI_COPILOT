@@ -384,15 +384,16 @@ class RTLGraph:
                         resolved.add(gid)
                         progress = True
             if not progress:
-                break
-
-            # Handle unresolvable cycles or missing signals safely to guarantee complete output
-            for gid in gate_ids:
-                if gid not in rank:
-                    # Look at any resolved inputs
-                    valid_ranks = [rank[inp] for inp in self.nodes[gid]["inputs"] if inp in rank]
-                    rank[gid] = 1 + (max(valid_ranks) if valid_ranks else (max(rank.values()) if rank else 0))
-                    resolved.add(gid)
+                # Handle unresolvable cycles or missing signals safely to guarantee complete output
+                fallback_progress = False
+                for gid in gate_ids:
+                    if gid not in rank:
+                        valid_ranks = [rank[inp] for inp in self.nodes[gid]["inputs"] if inp in rank]
+                        rank[gid] = 1 + (max(valid_ranks) if valid_ranks else (max(rank.values()) if rank else 0))
+                        resolved.add(gid)
+                        fallback_progress = True
+                if not fallback_progress:
+                    break
 
         # 3. Outputs get Max Rank + 1
         max_gate_rank = max(rank.values()) if rank else 0
@@ -699,3 +700,277 @@ class RTLGraph:
                     canvas.draw_text(cx, cy - 20, out_sig, font_size=9, font_weight="bold")
 
         return canvas
+
+    def generate_schematic_diagram_parts(self, theme="dark"):
+        """Draws column-partitioned gate-level Schematic Diagrams for readability in reports."""
+        canvas_width, canvas_height = self._compute_layout()
+
+        # Group by rank
+        columns = {}
+        for nid, r in self.rank.items():
+            columns.setdefault(r, []).append(nid)
+        sorted_ranks = sorted(columns.keys())
+        num_cols = len(sorted_ranks)
+
+        # Split into readable sections
+        MAX_COLS_PER_PAGE = 3
+        chunks = []
+        if num_cols <= 4:
+            chunks.append(sorted_ranks)
+        else:
+            current_chunk = []
+            for r in sorted_ranks:
+                current_chunk.append(r)
+                if len(current_chunk) == MAX_COLS_PER_PAGE:
+                    chunks.append(current_chunk)
+                    current_chunk = []
+            if current_chunk:
+                chunks.append(current_chunk)
+
+        col_width = 160
+        padding_x = 60
+
+        canvases = []
+        for chunk_ranks in chunks:
+            min_r = min(chunk_ranks)
+            max_r = max(chunk_ranks)
+            num_chunk_cols = len(chunk_ranks)
+
+            chunk_width = max(280, 2 * padding_x + (num_chunk_cols - 1) * col_width)
+            chunk_height = canvas_height
+
+            canvas = MiniCanvas(chunk_width, chunk_height, theme=theme)
+
+            # Filter and shift wires for this chunk
+            chunk_wires = []
+            for nid, node in self.nodes.items():
+                if node["type"] == "input":
+                    continue
+                for idx, inp_id in enumerate(node["inputs"]):
+                    if inp_id not in self.nodes:
+                        continue
+                    src_node = self.nodes[inp_id]
+                    r_src = self.rank.get(src_node["id"], 0)
+                    r_dst = self.rank.get(node["id"], 0)
+
+                    # Wire is present if either source or destination rank is in chunk
+                    if r_src not in chunk_ranks and r_dst not in chunk_ranks:
+                        continue
+
+                    # Original coordinates
+                    if src_node["type"] == "input":
+                        xs = src_node["x"] + 10
+                        ys = src_node["y"]
+                    else:
+                        gt = src_node.get("gate_type", "")
+                        bubble_offset = 24 if gt in ["NAND", "NOR", "XNOR", "NOT"] else 20
+                        xs = src_node["x"] + bubble_offset
+                        ys = src_node["y"]
+
+                    if node["type"] == "output":
+                        xd = node["x"] - 10
+                        yd = node["y"]
+                    else:
+                        xd = node["x"] - 20
+                        num_gate_inputs = len(node["inputs"])
+                        if num_gate_inputs > 1:
+                            yd = node["y"] - 10 + idx * (20 / (num_gate_inputs - 1))
+                        else:
+                            yd = node["y"]
+
+                    # Shifted coordinates
+                    if r_src in chunk_ranks:
+                        xs_shifted = xs - min_r * col_width
+                        ys_shifted = ys
+                    else:
+                        xs_shifted = 15
+                        ys_shifted = ys
+
+                    if r_dst in chunk_ranks:
+                        xd_shifted = xd - min_r * col_width
+                        yd_shifted = yd
+                    else:
+                        xd_shifted = chunk_width - 15
+                        yd_shifted = yd
+
+                    chunk_wires.append({
+                        "src_id": src_node["id"],
+                        "dst_id": node["id"],
+                        "idx": idx,
+                        "xs": xs_shifted,
+                        "ys": ys_shifted,
+                        "xd": xd_shifted,
+                        "yd": yd_shifted,
+                        "r_src": r_src,
+                        "src_node": src_node
+                    })
+
+            # Group wires by r_src and draw them
+            transition_groups = {}
+            for w in chunk_wires:
+                transition_groups.setdefault(w["r_src"], []).append(w)
+
+            for r_s, group in transition_groups.items():
+                sorted_group = sorted(group, key=lambda item: (item["ys"], item["yd"]))
+                for lane_idx, w in enumerate(sorted_group):
+                    xs, ys = w["xs"], w["ys"]
+                    xd, yd = w["xd"], w["yd"]
+                    src_node = w["src_node"]
+
+                    # Assign dynamic lane offset
+                    if r_s in chunk_ranks:
+                        lane_x = xs + 30 + lane_idx * 8
+                        if lane_x >= xd - 15:
+                            lane_x = xd - 15
+                    else:
+                        lane_x = xs + 10
+
+                    wire_commands = [
+                        ('M', xs, ys),
+                        ('L', lane_x, ys),
+                        ('L', lane_x, yd),
+                        ('L', xd, yd)
+                    ]
+                    canvas.draw_path(wire_commands, stroke_width=1.5)
+
+                    # Draw actual RTL signal name label
+                    if r_s in chunk_ranks and src_node["type"] == "gate":
+                        if src_node.get("gate_type") != "CORE":
+                            sig_label = src_node["outputs"][0]
+                            canvas.draw_text(
+                                xs + 8, ys - 5, sig_label,
+                                font_size=8, text_anchor="left",
+                                color=canvas.colors["wire_label"]
+                            )
+
+            # Draw actual components/nodes
+            for nid, node in self.nodes.items():
+                r = self.rank.get(nid, 0)
+                if r not in chunk_ranks:
+                    continue
+
+                cx = node["x"] - min_r * col_width
+                cy = node["y"]
+
+                if node["type"] == "input":
+                    canvas.draw_circle(cx, cy, 4)
+                    canvas.draw_text(cx - 10, cy + 3, node["label"], font_size=10, text_anchor="right", font_weight="bold")
+
+                elif node["type"] == "output":
+                    canvas.draw_circle(cx, cy, 4)
+                    canvas.draw_text(cx + 10, cy + 3, node["label"], font_size=10, text_anchor="left", font_weight="bold")
+
+                elif node["type"] == "gate":
+                    gt = node["gate_type"]
+
+                    if gt == "AND":
+                        commands = [
+                            ('M', cx - 20, cy - 15),
+                            ('L', cx, cy - 15),
+                            ('C', cx + 15, cy - 15, cx + 15, cy + 15, cx, cy + 15),
+                            ('L', cx - 20, cy + 15),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+
+                    elif gt == "OR":
+                        commands = [
+                            ('M', cx - 20, cy - 15),
+                            ('C', cx - 12, cy - 7, cx - 12, cy + 7, cx - 20, cy + 15),
+                            ('C', cx, cy + 15, cx + 10, cy + 8, cx + 20, cy),
+                            ('C', cx + 10, cy - 8, cx, cy - 15, cx - 20, cy - 15),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+
+                    elif gt == "XOR":
+                        back_commands = [
+                            ('M', cx - 24, cy - 15),
+                            ('C', cx - 16, cy - 7, cx - 16, cy + 7, cx - 24, cy + 15)
+                        ]
+                        canvas.draw_path(back_commands, stroke=canvas.colors["gate_stroke"])
+
+                        commands = [
+                            ('M', cx - 20, cy - 15),
+                            ('C', cx - 12, cy - 7, cx - 12, cy + 7, cx - 20, cy + 15),
+                            ('C', cx, cy + 15, cx + 10, cy + 8, cx + 20, cy),
+                            ('C', cx + 10, cy - 8, cx, cy - 15, cx - 20, cy - 15),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+
+                    elif gt == "NOT":
+                        commands = [
+                            ('M', cx - 15, cy - 12),
+                            ('L', cx + 10, cy),
+                            ('L', cx - 15, cy + 12),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+                        canvas.draw_circle(cx + 14, cy, 4, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"], stroke_width=1.5)
+
+                    elif gt == "NAND":
+                        commands = [
+                            ('M', cx - 20, cy - 15),
+                            ('L', cx, cy - 15),
+                            ('C', cx + 15, cy - 15, cx + 15, cy + 15, cx, cy + 15),
+                            ('L', cx - 20, cy + 15),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+                        canvas.draw_circle(cx + 19, cy, 4, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"], stroke_width=1.5)
+
+                    elif gt == "NOR":
+                        commands = [
+                            ('M', cx - 20, cy - 15),
+                            ('C', cx - 12, cy - 7, cx - 12, cy + 7, cx - 20, cy + 15),
+                            ('C', cx, cy + 15, cx + 10, cy + 8, cx + 20, cy),
+                            ('C', cx + 10, cy - 8, cx, cy - 15, cx - 20, cy - 15),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+                        canvas.draw_circle(cx + 24, cy, 4, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"], stroke_width=1.5)
+
+                    elif gt == "XNOR":
+                        back_commands = [
+                            ('M', cx - 24, cy - 15),
+                            ('C', cx - 16, cy - 7, cx - 16, cy + 7, cx - 24, cy + 15)
+                        ]
+                        canvas.draw_path(back_commands, stroke=canvas.colors["gate_stroke"])
+
+                        commands = [
+                            ('M', cx - 20, cy - 15),
+                            ('C', cx - 12, cy - 7, cx - 12, cy + 7, cx - 20, cy + 15),
+                            ('C', cx, cy + 15, cx + 10, cy + 8, cx + 20, cy),
+                            ('C', cx + 10, cy - 8, cx, cy - 15, cx - 20, cy - 15),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+                        canvas.draw_circle(cx + 24, cy, 4, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"], stroke_width=1.5)
+
+                    elif gt == "MUX":
+                        commands = [
+                            ('M', cx - 15, cy - 15),
+                            ('L', cx - 15, cy + 15),
+                            ('L', cx + 15, cy + 8),
+                            ('L', cx + 15, cy - 8),
+                            ('Z',)
+                        ]
+                        canvas.draw_path(commands, fill=canvas.colors["gate_fill"], stroke=canvas.colors["gate_stroke"])
+                        canvas.draw_text(cx - 3, cy + 3, "MUX", font_size=8, font_weight="bold")
+
+                    elif gt == "CORE":
+                        canvas.draw_rect(cx - 50, cy - 30, 100, 60, rx=4, ry=4)
+                        canvas.draw_text(cx, cy + 3, "Sequential Core", font_size=9, font_weight="bold")
+
+                    else:
+                        canvas.draw_rect(cx - 20, cy - 15, 40, 30, rx=2, ry=2)
+                        canvas.draw_text(cx, cy + 3, node["label"], font_size=10, font_weight="bold")
+
+                    if gt != "CORE":
+                        out_sig = node["outputs"][0]
+                        canvas.draw_text(cx, cy - 20, out_sig, font_size=9, font_weight="bold")
+
+            canvases.append(canvas)
+
+        return canvases
