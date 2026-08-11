@@ -1,10 +1,18 @@
 import os
+import sys
 import sqlite3
 import hashlib
 import datetime
 import jwt
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "database.db")
+# Detect if running in a test session
+IS_TESTING = "pytest" in sys.modules or os.getenv("TESTING") == "1"
+
+if IS_TESTING:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "database_test.db")
+else:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "database.db")
+
 JWT_SECRET = os.getenv("JWT_SECRET_KEY", "vlsi_copilot_super_secure_key_12345!")
 
 def get_db_connection():

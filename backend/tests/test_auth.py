@@ -4,6 +4,24 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 
+@pytest.fixture(scope="session", autouse=True)
+def clean_test_db():
+    test_db = os.path.join(os.path.dirname(os.path.dirname(__file__)), "database_test.db")
+    if os.path.exists(test_db):
+        try:
+            os.remove(test_db)
+        except Exception:
+            pass
+    # Reinitialize it
+    from backend.database import init_db
+    init_db()
+    yield
+    if os.path.exists(test_db):
+        try:
+            os.remove(test_db)
+        except Exception:
+            pass
+
 @pytest.fixture
 def client():
     # Set dummy API key for testing
