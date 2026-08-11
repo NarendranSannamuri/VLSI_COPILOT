@@ -1,34 +1,28 @@
-function DownloadCard() {
+import { Download } from "lucide-react";
+import Card from "../ui/Card";
+import Button from "../ui/Button";
+import { downloadReportUrl } from "../../services/api";
 
-    const downloadPDF = () => {
+function DownloadCard({ reportId }) {
+  const downloadPDF = () => {
+    if (!reportId) return;
+    window.open(downloadReportUrl(reportId), "_blank");
+  };
 
-        window.open(
-            "http://127.0.0.1:8000/download-report",
-            "_blank"
-        );
-
-    };
-
-    return (
-
-        <div className="bg-slate-900 rounded-2xl border border-slate-800 p-8">
-
-            <button
-
-                onClick={downloadPDF}
-
-                className="bg-blue-600 hover:bg-blue-700 rounded-xl px-6 py-3"
-
-            >
-
-                Download PDF Report
-
-            </button>
-
-        </div>
-
-    );
-
+  return (
+    <Card className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+      <div>
+        <h2 className="text-xl font-semibold">Engineering Report</h2>
+        <p className="mt-1 text-sm text-slate-400">
+          Download a PDF summary of score, review, metrics, and bugs.
+        </p>
+      </div>
+      <Button onClick={downloadPDF} disabled={!reportId}>
+        <Download size={16} />
+        Download PDF
+      </Button>
+    </Card>
+  );
 }
 
 export default DownloadCard;

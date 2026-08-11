@@ -1,41 +1,21 @@
+import Card from "../ui/Card";
+import CopyButton from "../ui/CopyButton";
+
 function TestbenchCard({ testbench }) {
+  if (!testbench) return null;
 
-    return (
+  return (
+    <Card>
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold">Generated Testbench</h2>
+        <CopyButton text={testbench} />
+      </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg">
-
-            <div className="flex justify-between items-center">
-
-                <h2 className="text-xl font-semibold">
-
-                    Generated Testbench
-
-                </h2>
-
-                <button
-
-                    onClick={() => navigator.clipboard.writeText(testbench)}
-
-                    className="border border-slate-700 px-4 py-2 rounded-lg"
-
-                >
-
-                    Copy
-
-                </button>
-
-            </div>
-
-            <pre className="mt-8 bg-slate-950 rounded-xl p-6 overflow-x-auto text-sm">
-
-                {testbench}
-
-            </pre>
-
-        </div>
-
-    );
-
+      <pre className="max-h-[420px] overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-5 font-mono text-sm text-slate-200">
+        {testbench}
+      </pre>
+    </Card>
+  );
 }
 
 export default TestbenchCard;

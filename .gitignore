@@ -1,5 +1,6 @@
 # Python
 venv/
+.venv/
 __pycache__/
 *.pyc
 
@@ -8,6 +9,7 @@ __pycache__/
 
 # Generated reports
 RTL_Report.pdf
+backend/reports/*.pdf
 
 # IDE
 .vscode/
@@ -18,6 +20,6 @@ Thumbs.db
 
 # Node
 frontend/node_modules/
-
+node_modules/
 # Logs
 *.log
