@@ -215,9 +215,10 @@ class RTLGraph:
     """
     def __init__(self, parsed_data):
         self.module_name = parsed_data.get("module_name") or "RTL_Module"
-        self.inputs = parsed_data.get("inputs") or []
-        self.outputs = parsed_data.get("outputs") or []
-        self.raw_assignments = parsed_data.get("assignments") or []
+        self.inputs = list(parsed_data.get("inputs") or [])
+        self.outputs = list(parsed_data.get("outputs") or [])
+        self.raw_assignments = list(parsed_data.get("assignments") or [])
+        self.parsed_data = parsed_data
 
         # Build the graph representation
         self.nodes = {}
@@ -225,7 +226,64 @@ class RTLGraph:
         self.rank = {}
         self._compute_layout()
 
+    def _add_fallback_gate(self, lhs, rhs, assigned_targets):
+        gate_type = "BUF"
+        label = "="
+        if "?" in rhs and ":" in rhs:
+            gate_type = "MUX"
+            label = "MUX"
+        elif "~&" in rhs:
+            gate_type = "NAND"
+            label = "~&"
+        elif "~|" in rhs:
+            gate_type = "NOR"
+            label = "~|"
+        elif "~^" in rhs or "^~" in rhs:
+            gate_type = "XNOR"
+            label = "~^"
+        elif "&" in rhs:
+            gate_type = "AND"
+            label = "&"
+        elif "|" in rhs:
+            gate_type = "OR"
+            label = "|"
+        elif "^" in rhs:
+            gate_type = "XOR"
+            label = "^"
+        elif "~" in rhs:
+            gate_type = "NOT"
+            label = "~"
+
+        node_id = f"gate_{lhs}"
+        tokens = re.findall(r"\b[a-zA-Z_]\w*\b", rhs)
+        KEYWORDS = {"assign", "wire", "reg", "input", "output", "module", "endmodule", "always", "begin", "end", "case", "endcase", "if", "else", "parameter", "localparam"}
+
+        node_inputs = []
+        for t in tokens:
+            if t not in KEYWORDS and t != lhs:
+                if t in self.inputs:
+                    node_inputs.append(f"in_{t}")
+                elif t in assigned_targets or f"gate_{t}" in self.nodes:
+                    node_inputs.append(f"gate_{t}")
+                else:
+                    node_inputs.append(f"in_{t}")
+
+        self.nodes[node_id] = {
+            "id": node_id,
+            "type": "gate",
+            "gate_type": gate_type,
+            "label": label,
+            "inputs": list(set(node_inputs)),
+            "outputs": [lhs]
+        }
+        assigned_targets.add(lhs)
+        if lhs in self.outputs:
+            self.nodes[f"out_{lhs}"]["inputs"] = [node_id]
+
     def _build_graph(self):
+        # Store a unique counter for generating node IDs
+        self.node_id_counter = 1
+
         # 1. Add input ports
         for inp in self.inputs:
             node_id = f"in_{inp}"
@@ -237,111 +295,217 @@ class RTLGraph:
                 "outputs": [inp]
             }
 
-        # 2. Parse and add assignments (gates)
-        assigned_targets = set()
-        for assign_str in self.raw_assignments:
-            cleaned = assign_str.replace("assign", "").strip()
-            if "=" not in cleaned:
-                continue
-            parts = cleaned.split("=", 1)
-            lhs = parts[0].strip()
-            rhs = parts[1].strip()
-
-            # Identify inputs/operands from RHS (words matching variable names)
-            tokens = re.findall(r"\b[a-zA-Z_]\w*\b", rhs)
-            KEYWORDS = {"assign", "wire", "reg", "input", "output", "module", "endmodule", "always", "begin", "end", "case", "endcase", "if", "else", "parameter", "localparam"}
-
-            # Filter tokens to find valid input signals
-            inp_signals = []
-            for t in tokens:
-                if t not in KEYWORDS and (t in self.inputs or t in assigned_targets or any(lh in t for lh in [lhs] if t != lhs)):
-                    if t not in inp_signals:
-                        inp_signals.append(t)
-
-            # If no inputs matched (maybe constants or complex operators), let's keep all non-keyword tokens
-            if not inp_signals:
-                inp_signals = [t for t in tokens if t not in KEYWORDS and t != lhs]
-
-            # Categorize gate type
-            gate_type = "BUF"
-            label = "="
-            if "?" in rhs and ":" in rhs:
-                gate_type = "MUX"
-                label = "MUX"
-            elif "~&" in rhs:
-                gate_type = "NAND"
-                label = "~&"
-            elif "~|" in rhs:
-                gate_type = "NOR"
-                label = "~|"
-            elif "~^" in rhs or "^~" in rhs:
-                gate_type = "XNOR"
-                label = "~^"
-            elif "&" in rhs:
-                gate_type = "AND"
-                label = "&"
-            elif "|" in rhs:
-                gate_type = "OR"
-                label = "|"
-            elif "^" in rhs:
-                gate_type = "XOR"
-                label = "^"
-            elif "~" in rhs:
-                gate_type = "NOT"
-                label = "~"
-
-            node_id = f"gate_{lhs}"
-
-            # Map input signal names to node IDs
-            node_inputs = []
-            for sig in inp_signals:
-                # If sig is in inputs, it feeds from the input port node
-                if sig in self.inputs:
-                    node_inputs.append(f"in_{sig}")
-                else:
-                    # Otherwise it feeds from another gate node
-                    node_inputs.append(f"gate_{sig}")
-
-            self.nodes[node_id] = {
-                "id": node_id,
-                "type": "gate",
-                "gate_type": gate_type,
-                "label": label,
-                "inputs": node_inputs,
-                "outputs": [lhs]
-            }
-            assigned_targets.add(lhs)
-
-        # 3. Add output ports
+        # 2. Add output ports
         for out in self.outputs:
             node_id = f"out_{out}"
-
-            # Map its inputs
-            node_inputs = []
-            if out in assigned_targets:
-                node_inputs.append(f"gate_{out}")
-            elif out in self.inputs:
-                node_inputs.append(f"in_{out}")
-            else:
-                # Fallback to general gate if not found
-                possible_gate = f"gate_{out}"
-                if possible_gate in self.nodes:
-                    node_inputs.append(possible_gate)
-                else:
-                    node_inputs.append(f"in_{out}") # default feedthrough
-
             self.nodes[node_id] = {
                 "id": node_id,
                 "type": "output",
                 "label": out,
-                "inputs": node_inputs,
+                "inputs": [],
                 "outputs": []
             }
 
-        # 4. If sequential/FSM with no assignments (e.g. sequence detector):
-        # Let's create a beautiful fallback CORE node to represent the sequential core logic
-        has_gates = any(n["type"] == "gate" for n in self.nodes.values())
-        if not has_gates and (self.inputs or self.outputs):
+        # Helper function to recursively parse AST expression into gate nodes & edges
+        def build_ast_nodes(ast, target_signal=None):
+            if not ast:
+                return None
+
+            node_type = ast.get("type")
+
+            if node_type == "SIGNAL":
+                sig_name = ast.get("name")
+                # Check if it's a primary input
+                if sig_name in self.inputs:
+                    return f"in_{sig_name}"
+                # Check if it's already driven by a gate or sequential block
+                possible_gate = f"gate_{sig_name}"
+                if possible_gate in self.nodes:
+                    return possible_gate
+                # Check if it's a wire/signal that will be driven later, fallback to f"gate_{sig_name}"
+                return possible_gate
+
+            # Create gate ID
+            if target_signal and target_signal in self.outputs:
+                gate_id = f"gate_{target_signal}"
+            else:
+                gate_id = f"gate_{node_type}_{self.node_id_counter}"
+                self.node_id_counter += 1
+
+            if node_type in ("AND", "OR", "XOR", "NAND", "NOR", "XNOR"):
+                left_src = build_ast_nodes(ast.get("left"))
+                right_src = build_ast_nodes(ast.get("right"))
+
+                label = ast.get("op", node_type)
+                self.nodes[gate_id] = {
+                    "id": gate_id,
+                    "type": "gate",
+                    "gate_type": node_type,
+                    "label": label,
+                    "inputs": [x for x in [left_src, right_src] if x],
+                    "outputs": [target_signal] if target_signal else [gate_id]
+                }
+                return gate_id
+
+            elif node_type == "NOT":
+                child_src = build_ast_nodes(ast.get("operand"))
+
+                self.nodes[gate_id] = {
+                    "id": gate_id,
+                    "type": "gate",
+                    "gate_type": "NOT",
+                    "label": "~",
+                    "inputs": [child_src] if child_src else [],
+                    "outputs": [target_signal] if target_signal else [gate_id]
+                }
+                return gate_id
+
+            elif node_type == "MUX":
+                sel_src = build_ast_nodes(ast.get("sel"))
+                in1_src = build_ast_nodes(ast.get("in1"))
+                in0_src = build_ast_nodes(ast.get("in0"))
+
+                self.nodes[gate_id] = {
+                    "id": gate_id,
+                    "type": "gate",
+                    "gate_type": "MUX",
+                    "label": "MUX",
+                    "inputs": [x for x in [sel_src, in1_src, in0_src] if x],
+                    "outputs": [target_signal] if target_signal else [gate_id]
+                }
+                return gate_id
+
+            return None
+
+        # 3. Process AST / Continuous Assignments
+        assigned_targets = set()
+        parsed_assigns = self.parsed_data.get("parsed_assigns", [])
+
+        # If we have parsed_assigns with AST, use recursive AST parser
+        for item in parsed_assigns:
+            target = item["target"]
+            ast = item.get("ast")
+            if ast:
+                top_gate_id = build_ast_nodes(ast, target_signal=target)
+                assigned_targets.add(target)
+                # Link output port to top gate if target is output
+                if target in self.outputs:
+                    self.nodes[f"out_{target}"]["inputs"] = [top_gate_id]
+            else:
+                # Fallback simple continuous assign parser
+                expr = item.get("raw_expression", "")
+                self._add_fallback_gate(target, expr, assigned_targets)
+
+        # If no parsed_assigns, fall back to raw assignments
+        if not parsed_assigns and self.raw_assignments:
+            for assign_str in self.raw_assignments:
+                cleaned = assign_str.replace("assign", "").strip()
+                if "=" not in cleaned:
+                    continue
+                parts = cleaned.split("=", 1)
+                lhs = parts[0].strip()
+                rhs = parts[1].strip()
+                self._add_fallback_gate(lhs, rhs, assigned_targets)
+
+        # 4. Process Always / Sequential Blocks (FSM & DFFs)
+        always_blocks = self.parsed_data.get("always_blocks", [])
+        for blk in always_blocks:
+            clk = blk.get("clk", "clk")
+            rst = blk.get("rst", "rst")
+            targets = blk.get("targets", [])
+            is_fsm = blk.get("is_fsm", False)
+            body = blk.get("body", "")
+
+            # Ensure clk and rst are declared as input ports if they aren't
+            for sig in (clk, rst):
+                if sig and sig not in self.inputs:
+                    self.inputs.append(sig)
+                    inp_id = f"in_{sig}"
+                    if inp_id not in self.nodes:
+                        self.nodes[inp_id] = {
+                            "id": inp_id,
+                            "type": "input",
+                            "label": sig,
+                            "inputs": [],
+                            "outputs": [sig]
+                        }
+
+            clk_id = f"in_{clk}"
+            rst_id = f"in_{rst}"
+
+            if is_fsm:
+                next_state_id = f"gate_Next_State_Logic_{self.node_id_counter}"
+                state_reg_id = f"gate_State_Register_{self.node_id_counter}"
+                output_logic_id = f"gate_Output_Logic_{self.node_id_counter}"
+                self.node_id_counter += 1
+
+                # Gather module input signals feeding Next State logic
+                next_state_inputs = []
+                for inp in self.inputs:
+                    if inp not in (clk, rst):
+                        next_state_inputs.append(f"in_{inp}")
+                # Feedback from state register
+                next_state_inputs.append(state_reg_id)
+
+                self.nodes[next_state_id] = {
+                    "id": next_state_id,
+                    "type": "gate",
+                    "gate_type": "next_state",
+                    "label": "Next State Logic",
+                    "inputs": next_state_inputs,
+                    "outputs": ["next_state"]
+                }
+
+                self.nodes[state_reg_id] = {
+                    "id": state_reg_id,
+                    "type": "gate",
+                    "gate_type": "DFF",
+                    "label": "State Register",
+                    "inputs": [clk_id, rst_id, next_state_id],
+                    "outputs": ["state"]
+                }
+
+                self.nodes[output_logic_id] = {
+                    "id": output_logic_id,
+                    "type": "gate",
+                    "gate_type": "output_logic",
+                    "label": "Output Logic",
+                    "inputs": [state_reg_id],
+                    "outputs": targets
+                }
+
+                # Link always FSM targets to output ports
+                for tgt in targets:
+                    if tgt in self.outputs:
+                        self.nodes[f"out_{tgt}"]["inputs"] = [output_logic_id]
+            else:
+                for tgt in targets:
+                    dff_id = f"gate_{tgt}"
+
+                    body_signals = re.findall(r"\b[a-zA-Z_]\w*\b", body)
+                    inp_signals = []
+                    for s in body_signals:
+                        if s not in ("if", "else", "case", "endcase", "begin", "end", tgt, clk, rst):
+                            if s in self.inputs:
+                                inp_signals.append(f"in_{s}")
+                            elif f"gate_{s}" in self.nodes:
+                                inp_signals.append(f"gate_{s}")
+
+                    self.nodes[dff_id] = {
+                        "id": dff_id,
+                        "type": "gate",
+                        "gate_type": "DFF",
+                        "label": f"DFF ({tgt})",
+                        "inputs": [clk_id, rst_id] + list(set(inp_signals)),
+                        "outputs": [tgt]
+                    }
+
+                    if tgt in self.outputs:
+                        self.nodes[f"out_{tgt}"]["inputs"] = [dff_id]
+
+        # 5. Fallback sequential logic representation if no gates or dffs are built
+        has_logic = any(n["type"] == "gate" for n in self.nodes.values())
+        if not has_logic and (self.inputs or self.outputs):
             core_id = "gate_core"
             self.nodes[core_id] = {
                 "id": core_id,
@@ -351,11 +515,8 @@ class RTLGraph:
                 "inputs": [f"in_{inp}" for inp in self.inputs],
                 "outputs": self.outputs
             }
-            # Rewire output ports to feed from the central core node
             for out in self.outputs:
-                out_id = f"out_{out}"
-                if out_id in self.nodes:
-                    self.nodes[out_id]["inputs"] = [core_id]
+                self.nodes[f"out_{out}"]["inputs"] = [core_id]
 
     def _compute_layout(self):
         """Computes deterministic left-to-right topological rank and positions."""

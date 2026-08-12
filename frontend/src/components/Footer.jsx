@@ -1,7 +1,10 @@
 function Footer() {
   return (
-    <footer className="text-center py-12 text-slate-500 border-t border-slate-800 mt-20">
-      © 2026 VLSI Copilot • Built with React, FastAPI & Gemini
+    <footer className="border-t border-slate-800/80 px-6 py-12 text-center text-sm text-slate-500">
+      <p className="font-medium text-slate-300">VLSI Copilot</p>
+      <p className="mt-2">
+        © {new Date().getFullYear()} · Built with React, FastAPI & Gemini
+      </p>
     </footer>
   );
 }

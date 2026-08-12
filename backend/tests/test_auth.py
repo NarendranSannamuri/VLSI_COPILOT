@@ -39,6 +39,48 @@ def auth_header(client):
     token = res.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
 
+def test_user_registration_and_login(client):
+    email = "new_user@test.com"
+    password = "securepassword"
+
+    # Successful Registration
+    reg_res = client.post("/api/auth/register", json={"email": email, "password": password})
+    assert reg_res.status_code == 201
+    assert "User registered successfully." in reg_res.json()["message"]
+
+    # Short Password Validation
+    reg_short = client.post("/api/auth/register", json={"email": "short@test.com", "password": "123"})
+    assert reg_short.status_code == 400
+    assert "Password must be at least 6 characters" in reg_short.json()["detail"]
+
+    # Successful Login
+    login_res = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert login_res.status_code == 200
+    assert "access_token" in login_res.json()
+    assert login_res.json()["token_type"] == "bearer"
+
+def test_user_profile_protected(client, auth_header):
+    # Authenticated user request
+    res = client.get("/api/auth/me", headers=auth_header)
+    assert res.status_code == 200
+    assert res.json()["email"] == "test_user_auth@test.com"
+
+    # Unauthenticated profile request
+    res_unauth = client.get("/api/auth/me")
+    assert res_unauth.status_code == 401
+    assert "missing or malformed" in res_unauth.json()["detail"]
+
+def test_invalid_password_and_token(client):
+    # Invalid Password
+    res = client.post("/api/auth/login", json={"email": "nonexistent@test.com", "password": "wrongpassword"})
+    assert res.status_code == 401
+    assert "Invalid email or password" in res.json()["detail"]
+
+    # Invalid Token
+    res_token = client.get("/api/auth/me", headers={"Authorization": "Bearer invalid_token"})
+    assert res_token.status_code == 401
+    assert "Invalid or expired" in res_token.json()["detail"]
+
 def test_guest_upload_succeeds(client):
     verilog = """
     module test_module(input clk, rst, input a, output z);
@@ -54,80 +96,52 @@ def test_guest_upload_succeeds(client):
     assert data["syntax_errors"] == []
     assert data["parsed_data"]["module_name"] == "test_module"
 
-    # Premium features must be None for guests
-    assert data["metrics"] is None
-    assert data["block_diagram_svg"] is None
-    assert data["schematic_diagram_svg"] is None
-    assert data["bugs"] is None
-    assert data["ai_review"] is None
-
-def test_guest_rtl_explorer_and_analysis_succeeds(client):
-    verilog = """
-    module dummy(input clk, output z);
-        assign z = 1'b0;
-    endmodule
-    """
-    file_payload = {"file": ("dummy.v", io.BytesIO(verilog.encode("utf-8")), "text/plain")}
-    res = client.post("/upload", files=file_payload)
-
-    assert res.status_code == 200
-    data = res.json()
-
-    # RTL Explorer (parsed ports and statements) must succeed
-    assert data["parsed_data"]["inputs"] == ["clk"]
-    assert data["parsed_data"]["outputs"] == ["z"]
-    assert len(data["parsed_data"]["assignments"]) > 0
-
-    # RTL Analysis (warnings and summary) must succeed
-    assert "warnings" in data
-    assert "analysis" in data
-    assert "dummy" in data["analysis"]["rtl_summary"]
-
 def test_premium_endpoints_fail_for_guest(client):
     endpoints = [
-        ("/premium/diagrams", "post"),
-        ("/premium/metrics", "post"),
-        ("/premium/bugs", "post"),
-        ("/premium/ai-review", "post"),
-        ("/premium/testbench", "post"),
-        ("/premium/generate-report", "post"),
-        ("/download-report", "get")
+        ("/diagram", "post"),
+        ("/schematic", "post"),
+        ("/metrics", "post"),
+        ("/bugs", "post"),
+        ("/optimize", "post"),
+        ("/chat", "post"),
+        ("/report", "post"),
+        ("/download-report/invalid_id", "get"),
+        ("/testbench", "post")
     ]
 
-    payload = {"verilog_code": "module t; endmodule"}
+    payload = {"rtl": "module t; endmodule"}
+    chat_payload = {"rtl": "module t; endmodule", "question": "hello"}
+
     for path, method in endpoints:
+        req_payload = chat_payload if path == "/chat" else payload
         if method == "post":
-            res = client.post(path, json=payload)
+            res = client.post(path, json=req_payload)
         else:
             res = client.get(path)
         assert res.status_code == 401
+        assert "Authorization token is missing or malformed" in res.json()["detail"]
 
 def test_premium_endpoints_succeed_with_jwt(client, auth_header):
-    # Test diagrams
-    payload = {"verilog_code": "module test_premium(input a, b, output y); assign y = a & b; endmodule"}
+    payload = {
+        "rtl": "module test_premium(input a, b, output y); assign y = a & b; endmodule"
+    }
 
-    res = client.post("/premium/diagrams", json=payload, headers=auth_header)
+    # Test diagram
+    res = client.post("/diagram", json=payload, headers=auth_header)
     assert res.status_code == 200
-    assert "block_diagram_svg" in res.json()
-    assert "schematic_diagram_svg" in res.json()
+    assert "rtl_graph" in res.json()
+
+    # Test schematic
+    res = client.post("/schematic", json=payload, headers=auth_header)
+    assert res.status_code == 200
+    assert "schematic" in res.json()
 
     # Test metrics
-    res = client.post("/premium/metrics", json=payload, headers=auth_header)
+    res = client.post("/metrics", json=payload, headers=auth_header)
     assert res.status_code == 200
-    assert res.json()["metrics"]["design_type"] == "Combinational"
+    assert "metrics" in res.json()
 
     # Test testbench
-    res = client.post("/premium/testbench", json=payload, headers=auth_header)
+    res = client.post("/testbench", json=payload, headers=auth_header)
     assert res.status_code == 200
     assert "testbench" in res.json()
-
-def test_invalid_password_and_token(client):
-    # Invalid Password
-    res = client.post("/api/auth/login", json={"email": "nonexistent@test.com", "password": "wrongpassword"})
-    assert res.status_code == 401
-    assert "Invalid email or password" in res.json()["detail"]
-
-    # Invalid Token
-    res = client.post("/premium/diagrams", json={"verilog_code": "module t; endmodule"}, headers={"Authorization": "Bearer invalid_token"})
-    assert res.status_code == 401
-    assert "Invalid or expired" in res.json()["detail"]

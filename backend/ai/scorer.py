@@ -1,10 +1,7 @@
-import json
-
-from backend.ai.gemini_client import ask_gemini
+from backend.ai.groq_client import ask_groq, parse_json_response
 
 
 def score_verilog(verilog_code):
-
     prompt = f"""
 You are a Senior RTL Design Engineer.
 
@@ -32,16 +29,16 @@ Verilog Code:
 {verilog_code}
 """
 
-    response = ask_gemini(prompt)
+    response = ask_groq(prompt)
 
-    try:
-        return json.loads(response)
-    except Exception:
-        return {
+    return parse_json_response(
+        response,
+        {
             "rtl_score": 0,
             "coding_quality": "Unknown",
             "synthesizable": False,
             "latch_risk": False,
             "optimization": "Unknown",
-            "summary": "Failed to parse AI response."
-        }
+            "summary": "Failed to parse AI response.",
+        },
+    )
