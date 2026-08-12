@@ -63,14 +63,14 @@ def calculate_node_positions(nodes, edges):
         depth_groups.setdefault(d, []).append(n)
 
     # Calculate coordinates
-    h_spacing = 220
-    v_spacing = 110
+    h_spacing = 240
+    v_spacing = 120
 
     for d, col_nodes in depth_groups.items():
         for idx, node in enumerate(col_nodes):
             node["position"] = {
-                "x": 50 + d * h_spacing,
-                "y": 40 + idx * v_spacing,
+                "x": 80 + d * h_spacing,
+                "y": 60 + idx * v_spacing,
             }
 
 
@@ -326,10 +326,52 @@ def build_mermaid_diagram(parsed, graph=None):
     return "\n".join(lines)
 
 
+def get_node_dimensions(ntype):
+    if ntype == "input":
+        return 60, 32
+    elif ntype == "output":
+        return 60, 32
+    elif ntype in ("and", "nand", "or", "nor", "xor", "xnor", "not"):
+        return 60, 40
+    elif ntype == "dff":
+        return 80, 60
+    elif ntype == "mux":
+        return 60, 60
+    else:
+        return 80, 40
+
+
+def get_output_pin(nid, ntype, x, y):
+    w, h = get_node_dimensions(ntype)
+    # x is centered, y is the top of the node.
+    # Output pin is on the right-center edge
+    x_pin = x + (w // 2)
+    # If NAND/NOR/XNOR/NOT, shift slightly more right to clear negation bubble
+    if ntype in ("nand", "nor", "xnor", "not"):
+        x_pin += 6
+    return x_pin, y + (h // 2)
+
+
+def get_input_pin(nid, ntype, x, y):
+    w, h = get_node_dimensions(ntype)
+    # x is centered, y is the top of the node.
+    # Input pin is on the left-center edge
+    return x - (w // 2), y + (h // 2)
+
+
+def get_source_offset(src_id):
+    # Deterministic hash mapping to get separate vertical wire lanes
+    h = 0
+    for char in str(src_id):
+        h = (h * 31 + ord(char)) & 0xFFFFFFFF
+    idx = (h % 9) - 4
+    return idx * 12
+
+
 def build_svg_diagram(parsed, graph=None):
     """
-    Renders vector SVG schematic with dynamic bounding box calculation.
-    Uses solid 2px cyan wires with arrowheads and distinct gate silhouettes.
+    Renders vector SVG schematic with strictly orthogonal (Manhattan) wire routing,
+    recognizable logic gates (AND, OR, XOR, NOT, MUX, DFF), and shared signal trunks.
     """
     graph = graph or build_rtl_graph(parsed)
     nodes = graph.get("nodes", [])
@@ -352,17 +394,17 @@ def build_svg_diagram(parsed, graph=None):
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
 
-    padding = 60
+    padding = 80
     view_min_x = max(0, min_x - padding)
     view_min_y = max(0, min_y - padding)
-    view_width = max(450, (max_x - min_x) + padding * 3)
-    view_height = max(260, (max_y - min_y) + padding * 2)
+    view_width = max(550, (max_x - min_x) + padding * 3)
+    view_height = max(300, (max_y - min_y) + padding * 2)
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{view_width}" height="{view_height}" viewBox="{view_min_x} {view_min_y} {view_width} {view_height}" style="background-color: #020617; font-family: ui-monospace, monospace;">',
         '<defs>',
-        '  <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">',
-        '    <path d="M0,0 L0,8 L8,4 z" fill="#22d3ee" />',
+        '  <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">',
+        '    <path d="M0,0 L0,6 L6,3 z" fill="#22d3ee" />',
         '  </marker>',
         '  <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">',
         '    <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#1e293b" stroke-width="0.5"/>',
@@ -373,26 +415,96 @@ def build_svg_diagram(parsed, graph=None):
         '<g>',
     ]
 
-    # Draw Solid Wires
+    # Group edges by source
+    edges_by_src = {}
     for edge in edges:
-        src_pos = positions.get(edge.get("source"))
-        tgt_pos = positions.get(edge.get("target"))
-        if src_pos and tgt_pos:
-            x1, y1 = src_pos
-            x2, y2 = tgt_pos
-            mid_x = (x1 + x2) / 2
-            edge_label = html.escape(str(edge.get("label") or ""))
+        src = edge.get("source")
+        if src in positions:
+            edges_by_src.setdefault(src, []).append(edge)
 
-            parts.append(
-                f'<path d="M {x1+40} {y1+18} C {mid_x} {y1+18}, {mid_x} {y2+18}, {x2-30} {y2+18}" '
-                f'fill="none" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow)" />'
-            )
-            if edge_label:
+    # 1. Draw Strictly Orthogonal Wires (with trunks and junction dots)
+    for src, src_edges in edges_by_src.items():
+        x1, y1 = positions[src]
+        node1 = next((n for n in nodes if n["id"] == src), {})
+        ntype1 = node1.get("type", "logic")
+        x1_pin, y1_pin = get_output_pin(src, ntype1, x1, y1)
+
+        if len(src_edges) == 1:
+            edge = src_edges[0]
+            tgt = edge.get("target")
+            if tgt in positions:
+                x2, y2 = positions[tgt]
+                node2 = next((n for n in nodes if n["id"] == tgt), {})
+                ntype2 = node2.get("type", "logic")
+                x2_pin, y2_pin = get_input_pin(tgt, ntype2, x2, y2)
+
+                mid_x = (x1_pin + x2_pin) / 2 + get_source_offset(src)
+
+                # Purely orthogonal path with exactly 2 turns
                 parts.append(
-                    f'<text x="{mid_x}" y="{(y1+y2)/2 + 12}" text-anchor="middle" fill="#94a3b8" font-size="9">{edge_label}</text>'
+                    f'<path d="M {x1_pin},{y1_pin} L {mid_x},{y1_pin} L {mid_x},{y2_pin} L {x2_pin},{y2_pin}" '
+                    f'fill="none" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow)" />'
+                )
+                edge_label = html.escape(str(edge.get("label") or ""))
+                if edge_label:
+                    parts.append(
+                        f'<text x="{(x1_pin + mid_x)/2}" y="{y1_pin - 5}" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="ui-monospace, monospace;">{edge_label}</text>'
+                    )
+        else:
+            # Shared signal trunk for fan-out
+            targets_info = []
+            for edge in src_edges:
+                tgt = edge.get("target")
+                if tgt in positions:
+                    x2, y2 = positions[tgt]
+                    node2 = next((n for n in nodes if n["id"] == tgt), {})
+                    ntype2 = node2.get("type", "logic")
+                    x2_pin, y2_pin = get_input_pin(tgt, ntype2, x2, y2)
+                    targets_info.append((tgt, x2_pin, y2_pin, edge))
+
+            if targets_info:
+                avg_x2 = sum(t[1] for t in targets_info) / len(targets_info)
+                mid_x = (x1_pin + avg_x2) / 2 + get_source_offset(src)
+
+                y_coords = [y1_pin] + [t[2] for t in targets_info]
+                min_y = min(y_coords)
+                max_y = max(y_coords)
+
+                # Horizontal segment out of source
+                parts.append(
+                    f'<path d="M {x1_pin},{y1_pin} L {mid_x},{y1_pin}" '
+                    f'fill="none" stroke="#22d3ee" stroke-width="2" />'
                 )
 
-    # Draw Gate Nodes with distinct shapes
+                # Vertical trunk segment
+                parts.append(
+                    f'<path d="M {mid_x},{min_y} L {mid_x},{max_y}" '
+                    f'fill="none" stroke="#22d3ee" stroke-width="2" />'
+                )
+
+                # Horizontal segments into targets
+                for tgt, x2_pin, y2_pin, edge in targets_info:
+                    parts.append(
+                        f'<path d="M {mid_x},{y2_pin} L {x2_pin},{y2_pin}" '
+                        f'fill="none" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow)" />'
+                    )
+                    edge_label = html.escape(str(edge.get("label") or ""))
+                    if edge_label:
+                        parts.append(
+                            f'<text x="{(mid_x + x2_pin)/2}" y="{y2_pin - 5}" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="ui-monospace, monospace;">{edge_label}</text>'
+                        )
+
+                    # Junction dot only at actual branch target intersection
+                    parts.append(
+                        f'<circle cx="{mid_x}" cy="{y2_pin}" r="4.5" fill="#22d3ee" />'
+                    )
+
+                # Junction dot at source trunk intersection
+                parts.append(
+                    f'<circle cx="{mid_x}" cy="{y1_pin}" r="4.5" fill="#22d3ee" />'
+                )
+
+    # 2. Draw Highly Recognizable Digital Gates
     for node in nodes:
         pos = positions[node["id"]]
         x, y = pos[0], pos[1]
@@ -400,27 +512,121 @@ def build_svg_diagram(parsed, graph=None):
         label = html.escape(str(node.get("label") or node["id"]))
 
         if ntype == "input":
-            parts.append(f'<polygon points="{x-25},{y} {x+25},{y} {x+35},{y+16} {x+25},{y+32} {x-25},{y+32}" fill="#0f2b3c" stroke="#38bdf8" stroke-width="2"/>')
-            parts.append(f'<text x="{x+2}" y="{y+20}" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="bold">{label}</text>')
+            # Pentagonal tag pointing right
+            parts.append(
+                f'<polygon points="{x-30},{y} {x+15},{y} {x+30},{y+16} {x+15},{y+32} {x-30},{y+32}" '
+                f'fill="#0f2b3c" stroke="#38bdf8" stroke-width="2"/>'
+            )
+            parts.append(
+                f'<text x="{x-4}" y="{y+20}" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="bold" font-family="ui-monospace, monospace;">{label}</text>'
+            )
+
         elif ntype == "output":
-            parts.append(f'<polygon points="{x-25},{y} {x+25},{y} {x+35},{y+16} {x+25},{y+32} {x-25},{y+32}" fill="#064e3b" stroke="#34d399" stroke-width="2"/>')
-            parts.append(f'<text x="{x+2}" y="{y+20}" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="bold">{label}</text>')
+            # Pentagonal tag pointing right
+            parts.append(
+                f'<polygon points="{x-30},{y} {x+15},{y} {x+30},{y+16} {x+15},{y+32} {x-30},{y+32}" '
+                f'fill="#064e3b" stroke="#34d399" stroke-width="2"/>'
+            )
+            parts.append(
+                f'<text x="{x-4}" y="{y+20}" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="bold" font-family="ui-monospace, monospace;">{label}</text>'
+            )
+
         elif ntype in ("and", "nand"):
-            parts.append(f'<rect x="{x-25}" y="{y}" width="50" height="34" rx="4" fill="#1e1b4b" stroke="#818cf8" stroke-width="2"/>')
-            parts.append(f'<text x="{x}" y="{y+21}" text-anchor="middle" fill="#e0e7ff" font-size="11" font-weight="bold">{label}</text>')
-        elif ntype in ("or", "nor", "xor", "xnor"):
-            parts.append(f'<rect x="{x-25}" y="{y}" width="50" height="34" rx="12" fill="#311042" stroke="#c084fc" stroke-width="2"/>')
-            parts.append(f'<text x="{x}" y="{y+21}" text-anchor="middle" fill="#f3e8ff" font-size="11" font-weight="bold">{label}</text>')
-        elif ntype == "dff":
-            parts.append(f'<rect x="{x-35}" y="{y-6}" width="70" height="48" rx="6" fill="#172554" stroke="#60a5fa" stroke-width="2"/>')
-            parts.append(f'<path d="M {x-35} {y+28} L {x-26} {y+33} L {x-35} {y+38}" fill="none" stroke="#60a5fa" stroke-width="1.5"/>')
-            parts.append(f'<text x="{x}" y="{y+16}" text-anchor="middle" fill="#dbeafe" font-size="10" font-weight="bold">{label}</text>')
+            # AND gate D-shape
+            parts.append(
+                f'<path d="M {x-30},{y} L {x},{y} A 20,20 0 0,1 {x+20},{y+20} A 20,20 0 0,1 {x},{y+40} L {x-30},{y+40} Z" '
+                f'fill="#1e1b4b" stroke="#818cf8" stroke-width="2"/>'
+            )
+            if ntype == "nand":
+                parts.append(
+                    f'<circle cx="{x+24}" cy="{y+20}" r="4" fill="#1e1b4b" stroke="#818cf8" stroke-width="2"/>'
+                )
+            parts.append(
+                f'<text x="{x-10}" y="{y+24}" text-anchor="middle" fill="#e0e7ff" font-size="10" font-weight="bold" font-family="ui-monospace, monospace;">{label}</text>'
+            )
+
+        elif ntype in ("or", "nor"):
+            # OR gate pointed curved shape
+            parts.append(
+                f'<path d="M {x-30},{y} Q {x-15},{y+20} {x-30},{y+40} Q {x-10},{y+38} {x+20},{y+20} Q {x-10},{y+2} {x-30},{y} Z" '
+                f'fill="#311042" stroke="#c084fc" stroke-width="2"/>'
+            )
+            if ntype == "nor":
+                parts.append(
+                    f'<circle cx="{x+24}" cy="{y+20}" r="4" fill="#311042" stroke="#c084fc" stroke-width="2"/>'
+                )
+            parts.append(
+                f'<text x="{x-10}" y="{y+24}" text-anchor="middle" fill="#f3e8ff" font-size="10" font-weight="bold" font-family="ui-monospace, monospace;">{label}</text>'
+            )
+
+        elif ntype in ("xor", "xnor"):
+            # XOR has an extra curved line on the left
+            parts.append(
+                f'<path d="M {x-34},{y} Q {x-19},{y+20} {x-34},{y+40}" fill="none" stroke="#c084fc" stroke-width="2"/>'
+            )
+            parts.append(
+                f'<path d="M {x-28},{y} Q {x-13},{y+20} {x-28},{y+40} Q {x-8},{y+38} {x+22},{y+20} Q {x-8},{y+2} {x-28},{y} Z" '
+                f'fill="#311042" stroke="#c084fc" stroke-width="2"/>'
+            )
+            if ntype == "xnor":
+                parts.append(
+                    f'<circle cx="{x+26}" cy="{y+20}" r="4" fill="#311042" stroke="#c084fc" stroke-width="2"/>'
+                )
+            parts.append(
+                f'<text x="{x-8}" y="{y+24}" text-anchor="middle" fill="#f3e8ff" font-size="10" font-weight="bold" font-family="ui-monospace, monospace;">{label}</text>'
+            )
+
+        elif ntype == "not":
+            # Inverter triangle with bubble
+            parts.append(
+                f'<path d="M {x-20},{y+5} L {x+10},{y+20} L {x-20},{y+35} Z" '
+                f'fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>'
+            )
+            parts.append(
+                f'<circle cx="{x+14}" cy="{y+20}" r="4" fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>'
+            )
+            parts.append(
+                f'<text x="{x-10}" y="{y+23}" text-anchor="middle" fill="#ffe4e6" font-size="8" font-weight="bold" font-family="ui-monospace, monospace;">{label}</text>'
+            )
+
         elif ntype == "mux":
-            parts.append(f'<polygon points="{x-25},{y-4} {x+25},{y+4} {x+18},{y+34} {x-18},{y+34}" fill="#422006" stroke="#fb923c" stroke-width="2"/>')
-            parts.append(f'<text x="{x}" y="{y+19}" text-anchor="middle" fill="#fef3c7" font-size="10" font-weight="bold">MUX</text>')
+            # Trapezoid multiplexer
+            parts.append(
+                f'<polygon points="{x-20},{y} {x+20},{y+10} {x+20},{y+50} {x-20},{y+60}" '
+                f'fill="#422006" stroke="#fb923c" stroke-width="2"/>'
+            )
+            parts.append(
+                f'<text x="{x}" y="{y+34}" text-anchor="middle" fill="#fef3c7" font-size="10" font-weight="bold" font-family="ui-monospace, monospace;">MUX</text>'
+            )
+            parts.append(f'<text x="{x-14}" y="{y+18}" fill="#94a3b8" font-size="7" font-family="ui-monospace, monospace;">I0</text>')
+            parts.append(f'<text x="{x-14}" y="{y+46}" fill="#94a3b8" font-size="7" font-family="ui-monospace, monospace;">I1</text>')
+            parts.append(f'<text x="{x+10}" y="{y+33}" fill="#94a3b8" font-size="7" font-family="ui-monospace, monospace;">O</text>')
+
+        elif ntype == "dff":
+            # D Flip-Flop
+            parts.append(
+                f'<rect x="{x-40}" y="{y}" width="80" height="60" rx="6" fill="#172554" stroke="#60a5fa" stroke-width="2"/>'
+            )
+            # Clock triangle
+            parts.append(
+                f'<path d="M {x-40},{y+42} L {x-32},{y+47} L {x-40},{y+52}" fill="none" stroke="#60a5fa" stroke-width="1.5"/>'
+            )
+            parts.append(
+                f'<text x="{x}" y="{y+22}" text-anchor="middle" fill="#dbeafe" font-size="10" font-weight="bold" font-family="ui-monospace, monospace;">{label}</text>'
+            )
+            parts.append(f'<text x="{x-32}" y="{y+18}" fill="#93c5fd" font-size="8" font-family="ui-monospace, monospace;">D</text>')
+            parts.append(f'<text x="{x+22}" y="{y+18}" fill="#93c5fd" font-size="8" font-family="ui-monospace, monospace;">Q</text>')
+            parts.append(f'<text x="{x-30}" y="{y+50}" fill="#94a3b8" font-size="7" font-family="ui-monospace, monospace;">CLK</text>')
+            parts.append(f'<text x="{x}" y="{y+54}" text-anchor="middle" fill="#94a3b8" font-size="7" font-family="ui-monospace, monospace;">RST</text>')
+
         else:
-            parts.append(f'<rect x="{x-35}" y="{y}" width="70" height="36" rx="6" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>')
-            parts.append(f'<text x="{x}" y="{y+22}" text-anchor="middle" fill="#e2e8f0" font-size="10">{label}</text>')
+            # Default / Other block
+            parts.append(
+                f'<rect x="{x-40}" y="{y}" width="80" height="40" rx="6" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>'
+            )
+            parts.append(
+                f'<text x="{x}" y="{y+24}" text-anchor="middle" fill="#e2e8f0" font-size="9" font-family="ui-monospace, monospace;">{label}</text>'
+            )
 
     parts.append('</g></svg>')
     return "".join(parts)
