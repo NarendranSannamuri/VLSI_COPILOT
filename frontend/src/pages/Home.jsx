@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Cpu, FileCode2, Loader2, UploadCloud, Play } from "lucide-react";
+import { Cpu, FileCode2, Loader2, UploadCloud, Play, Code } from "lucide-react";
 import { useRtlWorkspace } from "../context/RtlWorkspaceContext";
 import Button from "../components/ui/Button";
 import ErrorBanner from "../components/ui/ErrorBanner";
@@ -9,9 +9,16 @@ import ErrorBanner from "../components/ui/ErrorBanner";
 function Home() {
   const navigate = useNavigate();
   const { loadFile, uploading, uploadError, setUploadError, setActiveTool } = useRtlWorkspace();
+
+  const [activeTab, setActiveTab] = useState("upload"); // "upload" or "paste"
   const [dragging, setDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileLoaded, setFileLoaded] = useState(false);
+
+  // Paste Code State
+  const [pastedCode, setPastedCode] = useState("");
+  const [pastedFilename, setPastedFilename] = useState("untitled.v");
+
   const fileInputRef = useRef(null);
 
   const handleFileSelect = useCallback(
@@ -36,10 +43,34 @@ function Home() {
     handleFileSelect(file);
   };
 
-  const handleStartAnalysis = () => {
-    if (!selectedFile && !fileLoaded) return;
-    setActiveTool("explorer");
-    navigate("/workspace");
+  const handleStartAnalysis = async () => {
+    if (activeTab === "upload") {
+      if (!selectedFile || !fileLoaded) return;
+      setActiveTool("explorer");
+      navigate("/workspace");
+    } else {
+      if (!pastedCode.trim()) {
+        setUploadError("Verilog code cannot be empty.");
+        return;
+      }
+
+      const cleanFilename = pastedFilename.trim() || "untitled.v";
+      if (!cleanFilename.toLowerCase().endsWith(".v") && !cleanFilename.toLowerCase().endsWith(".sv")) {
+        setUploadError("Filename must end with .v or .sv extension.");
+        return;
+      }
+
+      setUploadError("");
+      try {
+        // Create mock File object for pasted code
+        const mockFile = new File([pastedCode], cleanFilename, { type: "text/plain" });
+        await loadFile(mockFile);
+        setActiveTool("explorer");
+        navigate("/workspace");
+      } catch (err) {
+        // error stored in context
+      }
+    }
   };
 
   return (
@@ -54,7 +85,7 @@ function Home() {
         className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-16 px-6 py-16"
       >
         <section className="glass-strong overflow-hidden rounded-[2rem] border border-slate-800/70 bg-slate-950/85 p-10 shadow-[0_30px_90px_rgba(15,23,42,0.35)]">
-          <div className="grid gap-12 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+          <div className="grid gap-12 lg:grid-cols-[1.10fr_0.90fr] lg:items-center">
             <div>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">
                 <Cpu size={14} />
@@ -78,74 +109,156 @@ function Home() {
               </div>
             </div>
 
-            <div className="rounded-[1.75rem] border border-slate-800/70 bg-slate-950/90 p-9 shadow-[0_20px_60px_rgba(15,23,42,0.35)]">
-              <div className="flex items-center gap-3 rounded-3xl bg-slate-900/90 px-4 py-3 text-sm text-slate-300">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-400/15">
-                  <UploadCloud size={20} />
-                </span>
-                <div>
-                  <p className="font-semibold text-white">Upload RTL</p>
-                  <p className="text-sm text-slate-500">Drop .v or .sv files to begin.</p>
-                </div>
-              </div>
-
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={onDrop}
-                className={`glass mt-8 border-2 border-dashed p-8 transition ${
-                  dragging
-                    ? "border-cyan-400/60 bg-cyan-500/10"
-                    : "border-slate-700 hover:border-cyan-400/35"
-                }`}
-              >
-                <UploadCloud className="mx-auto text-cyan-300" size={36} />
-                <p className="mt-4 text-lg font-semibold text-slate-100">Drag & drop your RTL file</p>
-                <p className="mt-2 text-sm text-slate-400">
-                  Accepts <span className="font-mono text-cyan-300">.v</span> and <span className="font-mono text-cyan-300">.sv</span>
-                </p>
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".v,.sv"
-                  className="hidden"
-                  onChange={(e) => handleFileSelect(e.target.files?.[0])}
-                />
-
-                <Button
-                  variant="secondary"
-                  className="mt-6 w-full justify-center"
-                  disabled={uploading}
-                  onClick={() => fileInputRef.current?.click()}
+            <div className="rounded-[1.75rem] border border-slate-800/70 bg-slate-950/90 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.35)]">
+              {/* Tab Selector */}
+              <div className="flex border-b border-slate-800 mb-6">
+                <button
+                  type="button"
+                  className={`flex-1 py-3 text-center text-sm font-semibold transition border-b-2 ${
+                    activeTab === "upload"
+                      ? "border-cyan-400 text-cyan-300"
+                      : "border-transparent text-slate-400 hover:text-slate-200"
+                  }`}
+                  onClick={() => {
+                    setActiveTab("upload");
+                    setUploadError("");
+                  }}
                 >
-                  {uploading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      Loading file...
-                    </>
-                  ) : (
-                    "Browse files"
-                  )}
-                </Button>
-
-                {selectedFile && (
-                  <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-4 text-left">
-                    <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Selected RTL</p>
-                    <p className="mt-1 flex items-center gap-2 font-mono text-sm text-white">
-                      <FileCode2 size={16} className="text-cyan-300" />
-                      {selectedFile.name}
-                    </p>
-                  </div>
-                )}
+                  <UploadCloud size={16} className="inline mr-2" />
+                  Upload File
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 py-3 text-center text-sm font-semibold transition border-b-2 ${
+                    activeTab === "paste"
+                      ? "border-cyan-400 text-cyan-300"
+                      : "border-transparent text-slate-400 hover:text-slate-200"
+                  }`}
+                  onClick={() => {
+                    setActiveTab("paste");
+                    setUploadError("");
+                  }}
+                >
+                  <Code size={16} className="inline mr-2" />
+                  Paste Code
+                </button>
               </div>
+
+              {activeTab === "upload" ? (
+                <>
+                  <div className="flex items-center gap-3 rounded-3xl bg-slate-900/90 px-4 py-3 text-sm text-slate-300">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-400/15">
+                      <UploadCloud size={20} />
+                    </span>
+                    <div>
+                      <p className="font-semibold text-white">Upload RTL</p>
+                      <p className="text-sm text-slate-500">Drop .v or .sv files to begin.</p>
+                    </div>
+                  </div>
+
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragging(true);
+                    }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={onDrop}
+                    className={`glass mt-6 border-2 border-dashed p-8 transition ${
+                      dragging
+                        ? "border-cyan-400/60 bg-cyan-500/10"
+                        : "border-slate-700 hover:border-cyan-400/35"
+                    }`}
+                  >
+                    <UploadCloud className="mx-auto text-cyan-300" size={36} />
+                    <p className="mt-4 text-lg font-semibold text-slate-100">Drag & drop your RTL file</p>
+                    <p className="mt-2 text-sm text-slate-400">
+                      Accepts <span className="font-mono text-cyan-300">.v</span> and <span className="font-mono text-cyan-300">.sv</span>
+                    </p>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".v,.sv"
+                      className="hidden"
+                      onChange={(e) => handleFileSelect(e.target.files?.[0])}
+                    />
+
+                    <Button
+                      variant="secondary"
+                      className="mt-6 w-full justify-center"
+                      disabled={uploading}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      {uploading ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Loading file...
+                        </>
+                      ) : (
+                        "Browse files"
+                      )}
+                    </Button>
+
+                    {selectedFile && (
+                      <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-500/10 p-4 text-left">
+                        <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Selected RTL</p>
+                        <p className="mt-1 flex items-center gap-2 font-mono text-sm text-white">
+                          <FileCode2 size={16} className="text-cyan-300" />
+                          {selectedFile.name}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 rounded-3xl bg-slate-900/90 px-4 py-3 text-sm text-slate-300">
+                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-400/15">
+                        <Code size={20} />
+                      </span>
+                      <div>
+                        <p className="font-semibold text-white">Paste RTL Code</p>
+                        <p className="text-sm text-slate-500">Paste Verilog or SystemVerilog directly.</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                        Design Filename
+                      </label>
+                      <input
+                        type="text"
+                        value={pastedFilename}
+                        onChange={(e) => setPastedFilename(e.target.value)}
+                        placeholder="untitled.v"
+                        className="w-full rounded-xl border border-slate-800 bg-slate-950 px-4 py-2.5 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                        Verilog / SystemVerilog Code
+                      </label>
+                      <textarea
+                        rows={8}
+                        value={pastedCode}
+                        onChange={(e) => setPastedCode(e.target.value)}
+                        placeholder="// Enter your synthesizable design here...&#10;module adder(input a, input b, output sum);&#10;  assign sum = a ^ b;&#10;endmodule"
+                        className="w-full rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-sm text-white focus:border-cyan-400 focus:outline-none focus:ring-1 focus:ring-cyan-400 placeholder:text-slate-600 resize-y"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <Button
                 className="mt-6 w-full justify-center text-base font-semibold py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-500/20"
-                disabled={!selectedFile || uploading}
+                disabled={
+                  uploading ||
+                  (activeTab === "upload" && (!selectedFile || !fileLoaded)) ||
+                  (activeTab === "paste" && !pastedCode.trim())
+                }
                 onClick={handleStartAnalysis}
               >
                 <Play size={18} fill="currentColor" />

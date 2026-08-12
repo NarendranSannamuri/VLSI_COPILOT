@@ -154,7 +154,7 @@ function RTLDiagramContent({ graph, fullscreen, setFullscreen }) {
       id: `e-${index}`,
       source: String(edge.source),
       target: String(edge.target),
-      type: "smoothstep",
+      type: "step",
       animated: false,
       label: edge.label || "",
       style: { stroke: "#22d3ee", strokeWidth: 2 },
